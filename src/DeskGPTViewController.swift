@@ -17,56 +17,86 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
         userContentController.add(self, name: "directSaveImage")
         
         let jsSource = """
-        window.addEventListener('click', function(event) {
-            if (!event.altKey) return;
-            
-            var elements = document.elementsFromPoint(event.clientX, event.clientY);
-            var imgSrc = null;
-            if (elements && elements.length > 0) {
-                for (var i = 0; i < elements.length; i++) {
-                    var el = elements[i];
-                    if (el.tagName === 'IMG') {
-                        imgSrc = el.src;
-                        break;
-                    }
-                    if (el.tagName === 'CANVAS') {
-                        imgSrc = el.toDataURL();
-                        break;
-                    }
-                    var img = el.querySelector('img');
-                    if (img) {
-                        imgSrc = img.src;
-                        break;
-                    }
+        (function() {
+            // 1. Inject styles for the floating download button
+            var style = document.createElement('style');
+            style.innerHTML = `
+                .deskgpt-download-container {
+                    position: relative !important;
                 }
-            }
-            if (!imgSrc) {
-                // Fallback 1: Check if clicked inside a div container having background-image
-                for (var i = 0; i < elements.length; i++) {
-                    var el = elements[i];
-                    var bg = window.getComputedStyle(el).backgroundImage;
-                    if (bg && bg !== 'none') {
-                        var match = bg.match(/url\\(["']?([^"']+)["']?\\)/);
-                        if (match && match[1]) {
-                            imgSrc = match[1];
-                            break;
+                .deskgpt-download-btn {
+                    position: absolute !important;
+                    top: 12px !important;
+                    right: 12px !important;
+                    z-index: 999999 !important;
+                    background: rgba(15, 23, 42, 0.75) !important;
+                    backdrop-filter: blur(8px) -webkit-backdrop-filter: blur(8px) !important;
+                    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+                    border-radius: 6px !important;
+                    color: #ffffff !important;
+                    padding: 5px 10px !important;
+                    font-size: 12px !important;
+                    font-weight: 600 !important;
+                    cursor: pointer !important;
+                    opacity: 0 !important;
+                    transition: opacity 0.2s ease-in-out, background 0.15s ease !important;
+                    display: flex !important;
+                    align-items: center !important;
+                    gap: 4px !important;
+                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2) !important;
+                }
+                .deskgpt-download-btn:hover {
+                    background: rgba(15, 23, 42, 0.9) !important;
+                    border-color: rgba(255, 255, 255, 0.4) !important;
+                }
+                /* Reveal button on hover over the container */
+                .deskgpt-download-container:hover .deskgpt-download-btn {
+                    opacity: 1 !important;
+                }
+            `;
+            document.head.appendChild(style);
+
+            // 2. Scan and attach download buttons to images
+            function scanAndAttach() {
+                var images = document.querySelectorAll('img[src*="oaiusercontent.com"], img[src*="blob:"]');
+                images.forEach(function(img) {
+                    // Find parent container with position: relative or fallback to direct parent
+                    var container = img.closest('.relative') || img.parentElement;
+                    if (!container) return;
+                    
+                    // Mark the container
+                    container.classList.add('deskgpt-download-container');
+                    
+                    // Check if button is already added
+                    if (container.querySelector('.deskgpt-download-btn')) return;
+                    
+                    // Create sleek download button
+                    var btn = document.createElement('button');
+                    btn.className = 'deskgpt-download-btn';
+                    btn.innerHTML = '⬇️ 저장';
+                    btn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        
+                        var src = img.src;
+                        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.directSaveImage) {
+                            window.webkit.messageHandlers.directSaveImage.postMessage(src);
+                        } else {
+                            alert("Direct save handler is not available. Please restart the app.");
                         }
-                    }
-                }
+                    });
+                    
+                    container.appendChild(btn);
+                });
             }
-            if (!imgSrc) {
-                // Fallback 2: Try to find any active/latest generated image near the click context
-                var activePreviews = document.querySelectorAll('img[src*="oaiusercontent.com"], img[src*="blob:"], div[style*="background-image"] img');
-                if (activePreviews && activePreviews.length > 0) {
-                    imgSrc = activePreviews[activePreviews.length - 1].src;
-                }
-            }
-            if (imgSrc) {
-                event.preventDefault();
-                event.stopPropagation();
-                window.webkit.messageHandlers.directSaveImage.postMessage(imgSrc);
-            }
-        }, true);
+
+            // Run scans periodically and via MutationObserver to support dynamic React DOM updates
+            scanAndAttach();
+            setInterval(scanAndAttach, 1500);
+            
+            var observer = new MutationObserver(scanAndAttach);
+            observer.observe(document.body, { childList: true, subtree: true });
+        })();
         """
         let userScript = WKUserScript(source: jsSource, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
         userContentController.addUserScript(userScript)
