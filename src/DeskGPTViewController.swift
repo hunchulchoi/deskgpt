@@ -12,6 +12,59 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
         // Enable Safari Web Inspector / DevTools for debugging
         webConfiguration.preferences.setValue(true, forKey: "developerExtrasEnabled")
         
+        // Configure WKUserContentController for JS message posting and script injection
+        let userContentController = WKUserContentController()
+        userContentController.add(self, name: "directSaveImage")
+        
+        let jsSource = """
+        window.addEventListener('click', function(event) {
+            if (!event.altKey) return;
+            
+            var elements = document.elementsFromPoint(event.clientX, event.clientY);
+            var imgSrc = null;
+            if (elements && elements.length > 0) {
+                for (var i = 0; i < elements.length; i++) {
+                    var el = elements[i];
+                    if (el.tagName === 'IMG') {
+                        imgSrc = el.src;
+                        break;
+                    }
+                    if (el.tagName === 'CANVAS') {
+                        imgSrc = el.toDataURL();
+                        break;
+                    }
+                    var img = el.querySelector('img');
+                    if (img) {
+                        imgSrc = img.src;
+                        break;
+                    }
+                }
+            }
+            if (!imgSrc) {
+                // Fallback: Check if clicked inside a div container having background-image
+                for (var i = 0; i < elements.length; i++) {
+                    var el = elements[i];
+                    var bg = window.getComputedStyle(el).backgroundImage;
+                    if (bg && bg !== 'none') {
+                        var match = bg.match(/url\\\\(["']?([^"']+)["']?\\\\)/);
+                        if (match && match[1]) {
+                            imgSrc = match[1];
+                            break;
+                        }
+                    }
+                }
+            }
+            if (imgSrc) {
+                event.preventDefault();
+                event.stopPropagation();
+                window.webkit.messageHandlers.directSaveImage.postMessage(imgSrc);
+            }
+        }, true);
+        """
+        let userScript = WKUserScript(source: jsSource, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        userContentController.addUserScript(userScript)
+        webConfiguration.userContentController = userContentController
+        
         webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 1200, height: 800), configuration: webConfiguration)
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -266,14 +319,19 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
                     return titlesToRemove.contains { title.contains($0) }
                 }
                 
+                // Determine system preferred language to display native-like Korean/English
+                let isKorean = NSLocale.preferredLanguages.first?.hasPrefix("ko") ?? false
+                let directTitle = isKorean ? "다운로드 폴더에 이미지 저장" : "Save Image to Downloads"
+                let saveAsTitle = isKorean ? "이미지를 다른 이름으로 저장..." : "Save Image As..."
+                
                 // Add direct download menu item
-                let directItem = NSMenuItem(title: "Save Image to Downloads (DeskGPT)", action: #selector(self.customSaveImageDirectAction(_:)), keyEquivalent: "")
+                let directItem = NSMenuItem(title: directTitle, action: #selector(self.customSaveImageDirectAction(_:)), keyEquivalent: "")
                 directItem.target = self
                 directItem.representedObject = url
                 menu.insertItem(directItem, at: 0)
                 
                 // Add custom save-as item
-                let saveAsItem = NSMenuItem(title: "Save Image As... (DeskGPT)", action: #selector(self.customSaveImageAction(_:)), keyEquivalent: "")
+                let saveAsItem = NSMenuItem(title: saveAsTitle, action: #selector(self.customSaveImageAction(_:)), keyEquivalent: "")
                 saveAsItem.target = self
                 saveAsItem.representedObject = url
                 menu.insertItem(saveAsItem, at: 1)
@@ -404,6 +462,29 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
             alert.alertStyle = .warning
             alert.addButton(withTitle: "확인")
             alert.runModal()
+        }
+    }
+}
+
+extension DeskGPTViewController: WKScriptMessageHandler {
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.name == "directSaveImage",
+              let imageUrlString = message.body as? String,
+              let url = URL(string: imageUrlString) else { return }
+        
+        // Deduce filename
+        var filename = url.lastPathComponent
+        if !filename.contains(".") {
+            filename = "image.png"
+        }
+        
+        let destinationUrl = getUniqueDownloadsURL(suggestedName: filename)
+        print("🚀 JavaScript Direct Save: Saving straight to \(destinationUrl.path)")
+        
+        if url.scheme == "data" {
+            self.saveDataURL(url, to: destinationUrl)
+        } else {
+            self.downloadImage(from: url, to: destinationUrl)
         }
     }
 }
