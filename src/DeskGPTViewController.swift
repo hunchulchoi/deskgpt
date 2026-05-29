@@ -156,7 +156,21 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         if #available(macOS 11.3, *) {
             if navigationAction.shouldPerformDownload {
-                decisionHandler(.download)
+                // Hijack WebKit's default context menu download action ("이미지 다운로드")
+                if let url = navigationAction.request.url {
+                    var filename = url.lastPathComponent
+                    if !filename.contains(".") {
+                        filename = "image.png"
+                    }
+                    let destinationUrl = self.getUniqueDownloadsURL(suggestedName: filename)
+                    print("🚀 Intercepted native download request for: \(url.absoluteString)")
+                    
+                    // Route securely to our custom downloader to sync cookies
+                    self.downloadImage(from: url, to: destinationUrl)
+                }
+                
+                // Cancel the native buggy thread to prevent double downloads and 403 errors
+                decisionHandler(.cancel)
                 return
             }
         }
@@ -195,17 +209,28 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
         if #available(macOS 11.3, *) {
             if navigationResponse.canShowMIMEType == false {
-                decisionHandler(.download)
+                // If it is a download attachment, hijack it cleanly
+                if let url = navigationResponse.response.url {
+                    let filename = navigationResponse.response.suggestedFilename ?? "file.dat"
+                    let destinationUrl = self.getUniqueDownloadsURL(suggestedName: filename)
+                    self.downloadImage(from: url, to: destinationUrl)
+                }
+                decisionHandler(.cancel)
                 return
             }
         }
         
         // Inspect HTTP headers for "Content-Disposition: attachment" (Crucial for ChatGPT image downloads)
         if let httpResponse = navigationResponse.response as? HTTPURLResponse,
-           let headers = httpResponse.allHeaderFields as? [String: String] {
+           let headers = httpResponse.allHeaderFields as? [String: String],
+           let url = navigationResponse.response.url {
             for (key, value) in headers {
                 if key.lowercased() == "content-disposition" && value.lowercased().contains("attachment") {
-                    decisionHandler(.download)
+                    let filename = navigationResponse.response.suggestedFilename ?? "file.dat"
+                    let destinationUrl = self.getUniqueDownloadsURL(suggestedName: filename)
+                    self.downloadImage(from: url, to: destinationUrl)
+                    
+                    decisionHandler(.cancel)
                     return
                 }
             }
