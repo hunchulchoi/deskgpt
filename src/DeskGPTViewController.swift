@@ -30,7 +30,7 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
         }
     }
     
-    // MARK: - WKUIDelegate: File Upload Open Panel
+    // MARK: - WKUIDelegate: File Upload and New Window Handling
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
         let openPanel = NSOpenPanel()
         openPanel.allowsMultipleSelection = parameters.allowsMultipleSelection
@@ -46,13 +46,53 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
         }
     }
     
-    // MARK: - WKNavigationDelegate: Intercept Downloads (macOS 11.3+)
-    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
-        if let mimeType = navigationResponse.response.mimeType, mimeType.contains("octet-stream") || navigationResponse.canShowMIMEType == false {
-            decisionHandler(.download)
-        } else {
-            decisionHandler(.allow)
+    // Handle target="_blank" links (essential for image downloads and external links)
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if navigationAction.targetFrame == nil {
+            if let url = navigationAction.request.url {
+                let host = url.host?.lowercased() ?? ""
+                // Open internal and OpenAI hosting CDN links inside the app, and external links in the default browser
+                if host.contains("chatgpt.com") || host.contains("openai.com") || host.contains("oaiusercontent.com") {
+                    webView.load(navigationAction.request)
+                } else {
+                    NSWorkspace.shared.open(url)
+                }
+            }
         }
+        return nil
+    }
+    
+    // MARK: - WKNavigationDelegate: Intercept Downloads (macOS 11.3+)
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if #available(macOS 11.3, *) {
+            if navigationAction.shouldPerformDownload {
+                decisionHandler(.download)
+                return
+            }
+        }
+        decisionHandler(.allow)
+    }
+    
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        if #available(macOS 11.3, *) {
+            if navigationResponse.canShowMIMEType == false {
+                decisionHandler(.download)
+                return
+            }
+        }
+        
+        // Inspect HTTP headers for "Content-Disposition: attachment" (Crucial for ChatGPT image downloads)
+        if let httpResponse = navigationResponse.response as? HTTPURLResponse,
+           let headers = httpResponse.allHeaderFields as? [String: String] {
+            for (key, value) in headers {
+                if key.lowercased() == "content-disposition" && value.lowercased().contains("attachment") {
+                    decisionHandler(.download)
+                    return
+                }
+            }
+        }
+        
+        decisionHandler(.allow)
     }
     
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
