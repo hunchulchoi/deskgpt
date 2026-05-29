@@ -41,17 +41,24 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
                 }
             }
             if (!imgSrc) {
-                // Fallback: Check if clicked inside a div container having background-image
+                // Fallback 1: Check if clicked inside a div container having background-image
                 for (var i = 0; i < elements.length; i++) {
                     var el = elements[i];
                     var bg = window.getComputedStyle(el).backgroundImage;
                     if (bg && bg !== 'none') {
-                        var match = bg.match(/url\\\\(["']?([^"']+)["']?\\\\)/);
+                        var match = bg.match(/url\\(["']?([^"']+)["']?\\)/);
                         if (match && match[1]) {
                             imgSrc = match[1];
                             break;
                         }
                     }
+                }
+            }
+            if (!imgSrc) {
+                // Fallback 2: Try to find any active/latest generated image near the click context
+                var activePreviews = document.querySelectorAll('img[src*="oaiusercontent.com"], img[src*="blob:"], div[style*="background-image"] img');
+                if (activePreviews && activePreviews.length > 0) {
+                    imgSrc = activePreviews[activePreviews.length - 1].src;
                 }
             }
             if (imgSrc) {
@@ -437,29 +444,55 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
     }
     
     private func downloadImage(from url: URL, to destination: URL) {
-        var request = URLRequest(url: url)
-        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
-        
-        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        // Fetch webview cookies to prevent 403 Forbidden errors when downloading protected CDN assets
+        WKWebsiteDataStore.default().httpCookieStore.getAllCookies { [weak self] cookies in
             guard let self = self else { return }
-            if let error = error {
-                self.showErrorAlert(message: "이미지 다운로드 실패", info: error.localizedDescription)
-                return
+            
+            var request = URLRequest(url: url)
+            request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
+            
+            // Map Swift cookies to the request HTTP headers manually
+            let headers = HTTPCookie.requestHeaderFields(with: cookies)
+            for (key, value) in headers {
+                request.setValue(value, forHTTPHeaderField: key)
             }
-            guard let data = data else {
-                self.showErrorAlert(message: "이미지 다운로드 실패", info: "데이터가 비어 있습니다.")
-                return
-            }
-            do {
-                try data.write(to: destination)
-                DispatchQueue.main.async {
-                    NSSound.beep()
+            
+            let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+                guard let self = self else { return }
+                if let error = error {
+                    self.showErrorAlert(message: "이미지 다운로드 실패", info: error.localizedDescription)
+                    return
                 }
-            } catch {
-                self.showErrorAlert(message: "이미지 저장 실패", info: error.localizedDescription)
+                
+                // Handle HTTP response errors (e.g., 403, 404)
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode >= 400 {
+                    self.showErrorAlert(message: "이미지 다운로드 실패", info: "서버가 \(httpResponse.statusCode) 에러를 반환했습니다. 세션 만료 혹은 보안 차단일 수 있습니다.")
+                    return
+                }
+                
+                guard let data = data else {
+                    self.showErrorAlert(message: "이미지 다운로드 실패", info: "데이터가 비어 있습니다.")
+                    return
+                }
+                do {
+                    try data.write(to: destination)
+                    DispatchQueue.main.async {
+                        NSSound.beep()
+                        
+                        // Notify the user exactly where the image was saved
+                        let alert = NSAlert()
+                        alert.messageText = "이미지 저장 완료"
+                        alert.informativeText = "이미지가 다운로드 폴더에 안전하게 저장되었습니다:\n\(destination.lastPathComponent)"
+                        alert.alertStyle = .informational
+                        alert.addButton(withTitle: "확인")
+                        alert.runModal()
+                    }
+                } catch {
+                    self.showErrorAlert(message: "이미지 저장 실패", info: error.localizedDescription)
+                }
             }
+            task.resume()
         }
-        task.resume()
     }
     
     private func saveDataURL(_ url: URL, to destination: URL) {
@@ -477,6 +510,14 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
             try data.write(to: destination)
             DispatchQueue.main.async {
                 NSSound.beep()
+                
+                // Notify the user exactly where the base64 image was saved
+                let alert = NSAlert()
+                alert.messageText = "이미지 저장 완료"
+                alert.informativeText = "이미지가 다운로드 폴더에 안전하게 저장되었습니다:\n\(destination.lastPathComponent)"
+                alert.alertStyle = .informational
+                alert.addButton(withTitle: "확인")
+                alert.runModal()
             }
         } catch {
             self.showErrorAlert(message: "이미지 저장 실패", info: error.localizedDescription)
