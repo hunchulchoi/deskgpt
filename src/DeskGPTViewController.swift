@@ -215,4 +215,125 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
             }
         }
     }
+    
+    // MARK: - WKUIDelegate: Custom Context Menu for Images (Save Image As... Fix)
+    func webView(_ webView: WKWebView, willOpenMenu menu: NSMenu, with event: NSEvent) {
+        // Convert screen-based event location to web view bounds
+        let point = webView.convert(event.locationInWindow, from: nil)
+        let webX = point.x
+        let webY = webView.bounds.height - point.y
+        
+        // Execute JavaScript to detect if an image or canvas element is under the cursor
+        let jsScript = """
+        (function() {
+            var el = document.elementFromPoint(\(webX), \(webY));
+            if (!el) return null;
+            if (el.tagName === 'IMG') return el.src;
+            var img = el.querySelector('img') || el.closest('img');
+            if (img) return img.src;
+            if (el.tagName === 'CANVAS') return el.toDataURL();
+            return null;
+        })();
+        """
+        
+        webView.evaluateJavaScript(jsScript) { [weak self] result, error in
+            guard let self = self, let imageUrlString = result as? String, let url = URL(string: imageUrlString) else { return }
+            
+            DispatchQueue.main.async {
+                // Clear any default buggy web view download items to prevent silent failures
+                let titlesToRemove = ["save image to downloads", "save image as", "download image", "이미지 저장", "다운로드", "다운로드 폴더에 이미지 저장"]
+                menu.items.removeAll { item in
+                    let title = item.title.lowercased()
+                    return titlesToRemove.contains { title.contains($0) }
+                }
+                
+                // Construct our premium custom Save Image item
+                let customItem = NSMenuItem(title: "Save Image As... (DeskGPT)", action: #selector(self.customSaveImageAction(_:)), keyEquivalent: "")
+                customItem.target = self
+                customItem.representedObject = url
+                
+                // Insert at the top of the context menu
+                menu.insertItem(customItem, at: 0)
+            }
+        }
+    }
+    
+    @objc func customSaveImageAction(_ sender: NSMenuItem) {
+        guard let imageUrl = sender.representedObject as? URL else { return }
+        
+        let savePanel = NSSavePanel()
+        savePanel.title = "Save Image"
+        
+        // Deduce filename
+        let filename = imageUrl.lastPathComponent
+        savePanel.nameFieldStringValue = filename.contains(".") ? filename : "image.png"
+        
+        savePanel.begin { [weak self] response in
+            guard let self = self, response == .OK, let destinationUrl = savePanel.url else { return }
+            
+            if imageUrl.scheme == "data" {
+                self.saveDataURL(imageUrl, to: destinationUrl)
+            } else {
+                self.downloadImage(from: imageUrl, to: destinationUrl)
+            }
+        }
+    }
+    
+    private func downloadImage(from url: URL, to destination: URL) {
+        var request = URLRequest(url: url)
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
+        
+        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+            if let error = error {
+                self.showErrorAlert(message: "이미지 다운로드 실패", info: error.localizedDescription)
+                return
+            }
+            guard let data = data else {
+                self.showErrorAlert(message: "이미지 다운로드 실패", info: "데이터가 비어 있습니다.")
+                return
+            }
+            do {
+                try data.write(to: destination)
+                DispatchQueue.main.async {
+                    NSSound.beep()
+                }
+            } catch {
+                self.showErrorAlert(message: "이미지 저장 실패", info: error.localizedDescription)
+            }
+        }
+        task.resume()
+    }
+    
+    private func saveDataURL(_ url: URL, to destination: URL) {
+        let urlString = url.absoluteString
+        guard let commaIndex = urlString.firstIndex(of: ",") else {
+            self.showErrorAlert(message: "이미지 저장 실패", info: "잘못된 Data URL 형식입니다.")
+            return
+        }
+        let base64String = String(urlString[urlString.index(after: commaIndex)...])
+        guard let data = Data(base64Encoded: base64String, options: .ignoreUnknownCharacters) else {
+            self.showErrorAlert(message: "이미지 저장 실패", info: "Base64 디코딩에 실패했습니다.")
+            return
+        }
+        do {
+            try data.write(to: destination)
+            DispatchQueue.main.async {
+                NSSound.beep()
+            }
+        } catch {
+            self.showErrorAlert(message: "이미지 저장 실패", info: error.localizedDescription)
+        }
+    }
+    
+    private func showErrorAlert(message: String, info: String) {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = message
+            alert.informativeText = info
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "확인")
+            alert.runModal()
+        }
+    }
 }
