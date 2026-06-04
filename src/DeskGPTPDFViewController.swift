@@ -1,5 +1,6 @@
 import Cocoa
 import PDFKit
+import UniformTypeIdentifiers
 
 class DeskGPTPDFViewController: NSViewController, NSTextFieldDelegate {
     var chunks: [String] = []
@@ -84,7 +85,7 @@ class DeskGPTPDFViewController: NSViewController, NSTextFieldDelegate {
         openPanel.allowsMultipleSelection = false
         openPanel.canChooseDirectories = false
         openPanel.canChooseFiles = true
-        openPanel.allowedFileTypes = ["pdf", "PDF"]
+        openPanel.allowedContentTypes = [.pdf]
         
         openPanel.begin { [weak self] response in
             guard let self = self, response == .OK, let url = openPanel.url else { return }

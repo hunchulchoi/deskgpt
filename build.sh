@@ -38,6 +38,7 @@ fi
 
 # 2. Copy metadata settings plist file
 cp src/Info.plist build/DeskGPT.app/Contents/Info.plist
+plutil -replace CFBundleVersion -string "$(date +%Y%m%d%H%M%S)" build/DeskGPT.app/Contents/Info.plist
 
 # 3. Swift high-performance compile & pack
 echo "🚀 Swift 파일 고속 컴파일 및 패키징..."
@@ -55,5 +56,10 @@ ditto build/DeskGPT.app /Applications/DeskGPT.app
 
 echo "🔧 LaunchServices에 DeskGPT 등록 중..."
 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f /Applications/DeskGPT.app
+
+echo "🧹 Dock 캐시 갱신 중..."
+touch /Applications/DeskGPT.app
+touch /Applications/DeskGPT.app/Contents/Info.plist
+killall Dock >/dev/null 2>&1 || true
 
 echo "🎉 DeskGPT.app 빌드 및 설치 성공! 경로: /Applications/DeskGPT.app"

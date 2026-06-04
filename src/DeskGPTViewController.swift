@@ -12,20 +12,10 @@ class DeskGPTWebView: WKWebView {
     var cachedContextMenuImageUrl: URL?
     
     override func menu(for event: NSEvent) -> NSMenu? {
-        let menu = super.menu(for: event)
-        if let menu = menu {
-            menu.delegate = menuDelegate as? NSMenuDelegate
-            menuDelegate?.webView(self, willOpenMenu: menu, with: event)
-        }
-        return menu
+        super.menu(for: event)
     }
 
     override func rightMouseDown(with event: NSEvent) {
-        if let imageUrl = cachedContextMenuImageUrl {
-            menuDelegate?.webView(self, didRightClickImage: imageUrl, with: event)
-            return
-        }
-
         super.rightMouseDown(with: event)
     }
 }
@@ -105,6 +95,8 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
     private var pendingExternalPromptAttempts: Int = 0
     private var externalPromptRetryTimer: DispatchWorkItem?
     private var composerFocusRetryTimer: DispatchWorkItem?
+    private var toastDismissWorkItem: DispatchWorkItem?
+    private weak var activeToastView: NSView?
     private var externalPromptPollTimer: DispatchSourceTimer?
     private let raycastInboxURL = URL(fileURLWithPath: "/private/tmp/deskgpt-raycast-inbox.txt")
     
@@ -164,94 +156,76 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
             `;
             document.head.appendChild(style);
 
-            // 2. Scan and attach download buttons to images
-            function scanAndAttach() {
-                var images = document.querySelectorAll('img[src*="oaiusercontent.com"], img[src*="blob:"]');
-                images.forEach(function(img) {
-                    // Find parent container with position: relative or fallback to direct parent
-                    var container = img.closest('.relative') || img.parentElement;
-                    if (!container) return;
-                    
-                    // Mark the container
-                    container.classList.add('deskgpt-download-container');
-                    
-                    // Check if button is already added
-                    if (container.querySelector('.deskgpt-download-btn')) return;
-                    
-                    // Create sleek download button
-                    var btn = document.createElement('button');
-                    btn.className = 'deskgpt-download-btn';
-                    btn.innerHTML = '⬇️ 저장';
-                    btn.addEventListener('click', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        
-                        var src = img.src;
-                        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.directSaveImage) {
-                            window.webkit.messageHandlers.directSaveImage.postMessage(src);
-                        } else {
-                            alert("Direct save handler is not available. Please restart the app.");
-                        }
-                    });
-                    
-                    container.appendChild(btn);
-                });
+            // 2. Attach download buttons only to newly discovered images.
+            var processedDownloadImages = new WeakSet();
+            var downloadableImageSelector = 'img[src*="oaiusercontent.com"], img[src*="blob:"]';
+
+            function isDownloadableImage(node) {
+                return node &&
+                    node.tagName === 'IMG' &&
+                    node.src &&
+                    (node.src.indexOf('oaiusercontent.com') !== -1 || node.src.indexOf('blob:') !== -1);
             }
 
-            // Run scans periodically and via MutationObserver to support dynamic React DOM updates
-            scanAndAttach();
-            setInterval(scanAndAttach, 1500);
-            
-            var observer = new MutationObserver(scanAndAttach);
-            observer.observe(document.body, { childList: true, subtree: true });
+            function attachDownloadButton(img) {
+                if (!isDownloadableImage(img) || processedDownloadImages.has(img)) return;
 
-            window.addEventListener('mousedown', function(event) {
-                if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.rightClickImageDetected) {
-                    return;
-                }
+                var container = img.closest('.relative') || img.parentElement;
+                if (!container) return;
 
-                if (event.button !== 2 && !(event.button === 0 && event.ctrlKey)) {
-                    return;
-                }
+                processedDownloadImages.add(img);
+                container.classList.add('deskgpt-download-container');
 
-                var elements = document.elementsFromPoint(event.clientX, event.clientY);
-                var imgSrc = "";
+                if (container.querySelector('.deskgpt-download-btn')) return;
 
-                if (elements && elements.length > 0) {
-                    for (var i = 0; i < elements.length; i++) {
-                        var el = elements[i];
-                        if (!el) continue;
+                var btn = document.createElement('button');
+                btn.className = 'deskgpt-download-btn';
+                btn.innerHTML = '⬇️ 저장';
+                btn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
 
-                        if (el.tagName === 'IMG') {
-                            imgSrc = el.src || "";
-                            break;
-                        }
-                        if (el.tagName === 'CANVAS') {
-                            try {
-                                imgSrc = el.toDataURL();
-                            } catch (e) {
-                                imgSrc = "";
-                            }
-                            break;
-                        }
-
-                        var nestedImg = el.querySelector && el.querySelector('img');
-                        if (nestedImg && nestedImg.src) {
-                            imgSrc = nestedImg.src;
-                            break;
-                        }
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.directSaveImage) {
+                        window.webkit.messageHandlers.directSaveImage.postMessage(img.src);
+                    } else {
+                        alert("Direct save handler is not available. Please restart the app.");
                     }
+                });
+
+                container.appendChild(btn);
+            }
+
+            function scanAndAttach(root) {
+                if (!root || root.nodeType !== Node.ELEMENT_NODE) return;
+
+                if (isDownloadableImage(root)) {
+                    attachDownloadButton(root);
                 }
 
-                window.webkit.messageHandlers.rightClickImageDetected.postMessage(imgSrc);
-            }, true);
+                if (!root.querySelectorAll) return;
+                root.querySelectorAll(downloadableImageSelector).forEach(attachDownloadButton);
+            }
 
-            // Cache right-clicked image URLs before WebKit shows the context menu.
-            window.addEventListener('contextmenu', function(event) {
-                if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.rightClickImageDetected) {
-                    return;
-                }
+            scanAndAttach(document.body);
 
+            var observer = new MutationObserver(function(mutations) {
+                mutations.forEach(function(mutation) {
+                    if (mutation.type === 'attributes') {
+                        scanAndAttach(mutation.target);
+                        return;
+                    }
+
+                    mutation.addedNodes.forEach(scanAndAttach);
+                });
+            });
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['src']
+            });
+
+            function resolveImageAtPoint(event) {
                 var elements = document.elementsFromPoint(event.clientX, event.clientY);
                 var imgSrc = "";
 
@@ -290,7 +264,38 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
                     }
                 }
 
-                window.webkit.messageHandlers.rightClickImageDetected.postMessage(imgSrc);
+                return imgSrc;
+            }
+
+            function postRightClickImage(event) {
+                if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.rightClickImageDetected) {
+                    return false;
+                }
+
+                var imgSrc = resolveImageAtPoint(event);
+                if (!imgSrc) {
+                    return false;
+                }
+
+                event.preventDefault();
+                event.stopPropagation();
+                window.webkit.messageHandlers.rightClickImageDetected.postMessage({
+                    url: imgSrc,
+                    x: event.clientX,
+                    y: event.clientY
+                });
+                return true;
+            }
+
+            window.addEventListener('mousedown', function(event) {
+                if (event.button !== 2 && !(event.button === 0 && event.ctrlKey)) {
+                    return;
+                }
+                postRightClickImage(event);
+            }, true);
+
+            window.addEventListener('contextmenu', function(event) {
+                postRightClickImage(event);
             }, true);
 
         })();
@@ -341,6 +346,16 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
         pendingExternalPromptAttempts = 0
         activateForExternalPrompt()
         attemptToSendPendingExternalPrompt()
+    }
+
+    private func currentMouseLocationInWebView() -> CGPoint {
+        guard let window = self.webView.window else {
+            return CGPoint(x: self.webView.bounds.midX, y: self.webView.bounds.midY)
+        }
+
+        let screenPoint = NSEvent.mouseLocation
+        let windowPoint = window.convertPoint(fromScreen: screenPoint)
+        return self.webView.convert(windowPoint, from: nil)
     }
 
     func activateForExternalPrompt() {
@@ -794,14 +809,7 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
                     try data.write(to: destination)
                     DispatchQueue.main.async {
                         NSSound.beep()
-                        
-                        // Notify the user exactly where the image was saved
-                        let alert = NSAlert()
-                        alert.messageText = "이미지 저장 완료"
-                        alert.informativeText = "이미지가 다운로드 폴더에 안전하게 저장되었습니다:\n\(destination.lastPathComponent)"
-                        alert.alertStyle = .informational
-                        alert.addButton(withTitle: "확인")
-                        alert.runModal()
+                        self.showToast(message: "이미지를 저장하였습니다")
                     }
                 } catch {
                     self.showErrorAlert(message: "이미지 저장 실패", info: error.localizedDescription)
@@ -826,17 +834,68 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
             try data.write(to: destination)
             DispatchQueue.main.async {
                 NSSound.beep()
-                
-                // Notify the user exactly where the base64 image was saved
-                let alert = NSAlert()
-                alert.messageText = "이미지 저장 완료"
-                alert.informativeText = "이미지가 다운로드 폴더에 안전하게 저장되었습니다:\n\(destination.lastPathComponent)"
-                alert.alertStyle = .informational
-                alert.addButton(withTitle: "확인")
-                alert.runModal()
+                self.showToast(message: "이미지를 저장하였습니다")
             }
         } catch {
             self.showErrorAlert(message: "이미지 저장 실패", info: error.localizedDescription)
+        }
+    }
+
+    private func showToast(message: String) {
+        DispatchQueue.main.async {
+            guard let hostView = self.webView else { return }
+
+            self.toastDismissWorkItem?.cancel()
+            self.activeToastView?.removeFromSuperview()
+
+            let container = NSVisualEffectView()
+            container.translatesAutoresizingMaskIntoConstraints = false
+            container.wantsLayer = true
+            container.material = .hudWindow
+            container.blendingMode = .withinWindow
+            container.state = .active
+            container.layer?.cornerRadius = 12
+            container.layer?.masksToBounds = true
+            container.alphaValue = 0.0
+
+            let label = NSTextField(labelWithString: message)
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.alignment = .center
+            label.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+            label.textColor = .white
+
+            container.addSubview(label)
+            hostView.addSubview(container, positioned: .above, relativeTo: nil)
+
+            NSLayoutConstraint.activate([
+                container.centerXAnchor.constraint(equalTo: hostView.centerXAnchor),
+                container.bottomAnchor.constraint(equalTo: hostView.bottomAnchor, constant: -28),
+                container.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
+                container.widthAnchor.constraint(lessThanOrEqualToConstant: 360),
+                label.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
+                label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
+                label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 18),
+                label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -18)
+            ])
+
+            hostView.layoutSubtreeIfNeeded()
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.18
+                container.animator().alphaValue = 1.0
+            }
+
+            let dismiss = DispatchWorkItem { [weak container] in
+                guard let container = container else { return }
+                NSAnimationContext.runAnimationGroup({ context in
+                    context.duration = 0.18
+                    container.animator().alphaValue = 0.0
+                }, completionHandler: {
+                    container.removeFromSuperview()
+                })
+            }
+            self.toastDismissWorkItem = dismiss
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: dismiss)
+            self.activeToastView = container
         }
     }
     
@@ -866,16 +925,28 @@ extension DeskGPTViewController: WKScriptMessageHandler {
             guard let imageUrlString = message.body as? String, let url = URL(string: imageUrlString) else { return }
             self.handleCopyImage(url: url)
         } else if message.name == "rightClickImageDetected" {
-            guard let imageUrlString = message.body as? String else { return }
-
-            if !imageUrlString.isEmpty, let url = URL(string: imageUrlString) {
-                self.lastContextMenuImageUrl = url
-                (self.webView as? DeskGPTWebView)?.cachedContextMenuImageUrl = url
-                print("🎯 Cached image URL under cursor: \(url.absoluteString)")
+            let payload: [String: Any]?
+            if let dict = message.body as? [String: Any] {
+                payload = dict
+            } else if let imageUrlString = message.body as? String, !imageUrlString.isEmpty {
+                payload = ["url": imageUrlString]
             } else {
+                payload = nil
+            }
+
+            guard let payload,
+                  let imageUrlString = payload["url"] as? String,
+                  let url = URL(string: imageUrlString)
+            else {
                 self.lastContextMenuImageUrl = nil
                 (self.webView as? DeskGPTWebView)?.cachedContextMenuImageUrl = nil
+                return
             }
+
+            self.lastContextMenuImageUrl = url
+            (self.webView as? DeskGPTWebView)?.cachedContextMenuImageUrl = url
+            print("🎯 Cached image URL under cursor: \(url.absoluteString)")
+            self.presentImageContextMenu(imageUrl: url, viewPoint: self.currentMouseLocationInWebView())
         } else if message.name == "externalPromptStatus" {
             guard let status = message.body as? String else { return }
             switch status {

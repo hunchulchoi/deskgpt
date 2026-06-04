@@ -4,6 +4,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var window: NSWindow?
     var viewController: DeskGPTViewController?
     private var imageContextMenuMonitor: Any?
+    private let mainWindowFrameKey = "DeskGPTMainWindowFrame"
     
     var pdfWindow: NSWindow?
     var pdfViewController: DeskGPTPDFViewController?
@@ -25,13 +26,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         win.contentViewController = viewController
         win.delegate = self
         
-        // Center the window on the main screen to prevent any off-screen positioning bugs
-        win.center()
-        
-        // Auto-saves window frame dimensions and position using a new cache key (v3) to bypass any corrupted coordinates
-        win.setFrameAutosaveName("DeskGPTMainWindow_v3")
-        
         self.window = win
+        restoreMainWindowFrameIfAvailable(win)
         
         // Make the window visible and key
         win.makeKeyAndOrderFront(nil)
@@ -40,8 +36,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         activateMainWindow()
         print("🚀 AppDelegate: Direct NSWindow created, ordered front, and app activated...")
 
-        installImageContextMenuMonitor()
-        
         setupMenu()
         print("🚀 AppDelegate: setupMenu finished...")
     }
@@ -56,10 +50,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // MARK: - NSWindowDelegate: Hide window instead of destroying to keep session active
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if sender == self.window {
+            saveMainWindowFrame(sender)
             sender.orderOut(nil)
             return false
         }
         return true
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window == self.window else { return }
+        saveMainWindowFrame(window)
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window == self.window else { return }
+        saveMainWindowFrame(window)
     }
     
     @objc func togglePDFHelper() {
@@ -202,6 +207,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         activateMainWindow()
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        if let window = window {
+            saveMainWindowFrame(window)
+        }
+    }
+
     private func activateMainWindow() {
         guard let window = window else {
             NSApp.activate(ignoringOtherApps: true)
@@ -213,6 +224,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.orderFrontRegardless()
         window.makeMain()
         window.makeKey()
+    }
+
+    private func restoreMainWindowFrameIfAvailable(_ window: NSWindow) {
+        if let frameString = UserDefaults.standard.string(forKey: mainWindowFrameKey) {
+            let frame = NSRectFromString(frameString)
+            if frame.width > 0, frame.height > 0 {
+                window.setFrame(frame, display: false)
+                return
+            }
+        }
+
+        window.center()
+    }
+
+    private func saveMainWindowFrame(_ window: NSWindow) {
+        UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: mainWindowFrameKey)
     }
 
     private func installImageContextMenuMonitor() {
