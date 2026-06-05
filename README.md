@@ -10,9 +10,22 @@
   <img src="assets/deskgpt_screen_shot.png" alt="DeskGPT screenshot" />
 </p>
 
-**DeskGPT** is an ultra-lightweight, premium standalone macOS application that wraps `https://chatgpt.com` in a native Cocoa frame.
+**DeskGPT** is a very small macOS program that simply opens `chatgpt.com` inside a native WebKit webview.
 
-Unlike bulky Electron-based or Chromium-based wrappers that consume hundreds of megabytes of RAM, DeskGPT is built directly on the native **Cocoa (AppKit)** framework and **WebKit (WKWebView)** engine. The compiled binary is **less than 1MB in size**, consumes minimal system resources, and launches instantly.
+It does not collect your data. The only network calls it makes outside ChatGPT itself are to **GitHub Releases** so it can check whether a new version is available.
+
+I made it because opening Safari and going to `chatgpt.com` over and over again was annoying.
+
+This app intentionally does almost nothing beyond wrapping ChatGPT in a native window, keeping your session alive, and making a few browser-like actions feel better on macOS.
+
+---
+
+## Minimal by Design
+
+* This is basically a native `chatgpt.com` webview wrapper for macOS.
+* It does not collect your data.
+* The only extra network traffic is GitHub Release checking for updates.
+* There are very few extra features on purpose. Most of the code exists to make the plain ChatGPT site feel a little more comfortable on a Mac.
 
 ---
 
