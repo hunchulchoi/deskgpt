@@ -1067,7 +1067,7 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
 
             let titleLabel = NSTextField(labelWithString: "새 버전 \(version)을 다운로드했습니다.")
             titleLabel.translatesAutoresizingMaskIntoConstraints = false
-            titleLabel.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
+            titleLabel.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
             titleLabel.textColor = .white
             titleLabel.maximumNumberOfLines = 2
             titleLabel.lineBreakMode = .byWordWrapping
@@ -1087,16 +1087,16 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
 
             let restartButton = NSButton(title: "Restart to Update", target: self, action: #selector(self.restartToUpdateAction(_:)))
             restartButton.bezelStyle = .rounded
-            restartButton.controlSize = .regular
-            restartButton.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+            restartButton.controlSize = .large
+            restartButton.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
             restartButton.contentTintColor = .white
             restartButton.isBordered = true
             restartButton.translatesAutoresizingMaskIntoConstraints = false
 
             let laterButton = NSButton(title: "다음 실행에 적용", target: self, action: #selector(self.deferUpdateAction(_:)))
             laterButton.bezelStyle = .texturedRounded
-            laterButton.controlSize = .regular
-            laterButton.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+            laterButton.controlSize = .large
+            laterButton.font = NSFont.systemFont(ofSize: 14, weight: .medium)
             laterButton.translatesAutoresizingMaskIntoConstraints = false
 
             let actionStack = NSStackView(views: [restartButton, laterButton])
@@ -1115,14 +1115,15 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
             hostView.addSubview(container, positioned: .above, relativeTo: nil)
 
             NSLayoutConstraint.activate([
-                container.topAnchor.constraint(equalTo: hostView.topAnchor, constant: 18),
+                container.topAnchor.constraint(equalTo: hostView.topAnchor, constant: 24),
                 container.centerXAnchor.constraint(equalTo: hostView.centerXAnchor),
-                container.widthAnchor.constraint(lessThanOrEqualToConstant: 760),
+                container.widthAnchor.constraint(lessThanOrEqualToConstant: 680),
                 contentStack.topAnchor.constraint(equalTo: container.topAnchor, constant: 16),
                 contentStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -16),
-                contentStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 18),
-                contentStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -18),
-                restartButton.heightAnchor.constraint(equalToConstant: 30)
+                contentStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
+                contentStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -20),
+                restartButton.heightAnchor.constraint(equalToConstant: 36),
+                laterButton.heightAnchor.constraint(equalToConstant: 36)
             ])
 
             container.layer?.backgroundColor = NSColor(calibratedWhite: 0.12, alpha: 0.78).cgColor
@@ -1147,19 +1148,22 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
             self.updateBannerView = nil
             self.updateBannerTitleLabel = nil
             self.updateBannerDetailLabel = nil
-            self.updateBannerVersion = nil
-            self.updateBannerDownloadURL = nil
         }
     }
 
     @objc private func restartToUpdateAction(_ sender: Any?) {
-        guard let downloadURL = updateBannerDownloadURL else { return }
-        UpdateInstaller.installAndRelaunch(from: downloadURL)
-        NSApp.terminate(nil)
+        restartToUpdate()
     }
 
     @objc private func deferUpdateAction(_ sender: Any?) {
         dismissUpdateBanner()
+    }
+
+    func restartToUpdate() {
+        let downloadURL = updateBannerDownloadURL ?? UpdateManager.shared.pendingUpdateDownloadURL()
+        guard let downloadURL else { return }
+        UpdateInstaller.installAndRelaunch(from: downloadURL)
+        NSApp.terminate(nil)
     }
     
     private func showErrorAlert(message: String, info: String) {

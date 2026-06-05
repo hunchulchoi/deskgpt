@@ -54,6 +54,9 @@ swiftc src/DeskGPTViewController.swift \
        -framework Cocoa -framework WebKit -framework PDFKit
 
 # 4. Install into /Applications so Finder/LaunchServices can pick up the latest build
+echo "🛑 실행 중인 DeskGPT 종료 중..."
+pkill -x DeskGPT >/dev/null 2>&1 || true
+
 echo "📦 /Applications/DeskGPT.app 으로 복사 중..."
 ditto build/DeskGPT.app /Applications/DeskGPT.app
 
@@ -63,6 +66,10 @@ echo "🔧 LaunchServices에 DeskGPT 등록 중..."
 echo "🧹 Dock 캐시 갱신 중..."
 touch /Applications/DeskGPT.app
 touch /Applications/DeskGPT.app/Contents/Info.plist
+touch /Applications/DeskGPT.app/Contents/Resources/AppIcon.icns
+killall Finder >/dev/null 2>&1 || true
+killall iconservicesagent >/dev/null 2>&1 || true
+killall iconservicesd >/dev/null 2>&1 || true
 killall Dock >/dev/null 2>&1 || true
 
 echo "🎉 DeskGPT.app 빌드 및 설치 성공! 경로: /Applications/DeskGPT.app"

@@ -7,6 +7,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UpdateMana
     private var preferencesWindowController: PreferencesWindowController?
     private var imageContextMenuMonitor: Any?
     private var refreshAccessoryViewController: NSTitlebarAccessoryViewController?
+    private weak var titlebarButtonContainer: NSView?
+    private weak var updateButton: NSButton?
     private let mainWindowFrameKey = "DeskGPTMainWindowFrame"
     
     var pdfWindow: NSWindow?
@@ -38,7 +40,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UpdateMana
         // Bring the window and application strictly to the foreground
         activateMainWindow()
         print("🚀 AppDelegate: Direct NSWindow created, ordered front, and app activated...")
-        installTitlebarRefreshButton(on: win)
+        installTitlebarButtons(on: win)
         updateManager.delegate = self
         updateManager.start()
         updateManager.checkForUpdatesNow()
@@ -209,31 +211,71 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UpdateMana
     
     @objc func resetSessionAction() { viewController?.resetSession() }
 
-    private func installTitlebarRefreshButton(on window: NSWindow) {
-        let button = NSButton(title: "", target: self, action: #selector(reloadAction))
-        button.bezelStyle = .texturedRounded
-        button.isBordered = false
-        button.isTransparent = false
-        button.contentTintColor = .secondaryLabelColor
-        button.toolTip = "새로고침"
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "새로고침")
-        button.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
-        button.imagePosition = .imageOnly
-        button.widthAnchor.constraint(equalToConstant: 36).isActive = true
-        button.heightAnchor.constraint(equalToConstant: 28).isActive = true
+    @objc private func checkForUpdatesAction() {
+        updateManager.checkForUpdatesNow(force: true)
+    }
 
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 42, height: 30))
-        container.addSubview(button)
+    @objc private func installUpdateAction() {
+        if let downloadURL = updateManager.pendingUpdateDownloadURL() {
+            UpdateInstaller.installAndRelaunch(from: downloadURL)
+            NSApp.terminate(nil)
+            return
+        }
+
+        viewController?.restartToUpdate()
+    }
+
+    private func installTitlebarButtons(on window: NSWindow) {
+        let refreshButton = NSButton(title: "", target: self, action: #selector(reloadAction))
+        refreshButton.bezelStyle = .texturedRounded
+        refreshButton.isBordered = false
+        refreshButton.isTransparent = false
+        refreshButton.contentTintColor = .secondaryLabelColor
+        refreshButton.toolTip = "새로고침"
+        refreshButton.translatesAutoresizingMaskIntoConstraints = false
+        refreshButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "새로고침")
+        refreshButton.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
+        refreshButton.imagePosition = .imageOnly
+        refreshButton.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        refreshButton.heightAnchor.constraint(equalToConstant: 28).isActive = true
+
+        let updateButton = NSButton(title: "Update to Restart", target: self, action: #selector(installUpdateAction))
+        updateButton.bezelStyle = .rounded
+        updateButton.isBordered = true
+        updateButton.isTransparent = false
+        updateButton.font = NSFont.systemFont(ofSize: 12.5, weight: .semibold)
+        updateButton.contentTintColor = .white
+        updateButton.wantsLayer = true
+        updateButton.layer?.backgroundColor = NSColor.systemBlue.cgColor
+        updateButton.layer?.cornerRadius = 8
+        updateButton.layer?.masksToBounds = true
+        updateButton.toolTip = "업데이트가 있으면 재시작해서 적용"
+        updateButton.isHidden = true
+        updateButton.translatesAutoresizingMaskIntoConstraints = false
+        updateButton.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        updateButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 148).isActive = true
+
+        let stack = NSStackView(views: [refreshButton, updateButton])
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 8
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 210, height: 30))
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
         NSLayoutConstraint.activate([
-            button.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            button.centerYAnchor.constraint(equalTo: container.centerYAnchor)
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor),
+            stack.centerYAnchor.constraint(equalTo: container.centerYAnchor)
         ])
 
         let accessory = NSTitlebarAccessoryViewController()
         accessory.view = container
         accessory.layoutAttribute = .left
         refreshAccessoryViewController = accessory
+        self.titlebarButtonContainer = container
+        self.updateButton = updateButton
         window.addTitlebarAccessoryViewController(accessory)
     }
 
@@ -259,6 +301,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UpdateMana
 
     func updateManager(_ manager: UpdateManager, didPrepareUpdate version: String, downloadURL: URL) {
         viewController?.showUpdateAvailable(version: version, downloadPath: downloadURL)
+        updateButton?.isHidden = false
+        titlebarButtonContainer?.frame.size.width = 370
     }
 
     private func activateMainWindow() {
@@ -277,13 +321,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UpdateMana
     private func restoreMainWindowFrameIfAvailable(_ window: NSWindow) {
         if let frameString = UserDefaults.standard.string(forKey: mainWindowFrameKey) {
             let frame = NSRectFromString(frameString)
-            if frame.width > 0, frame.height > 0 {
+            if frame.width > 0, frame.height > 0, isFrameVisibleOnAnyScreen(frame) {
                 window.setFrame(frame, display: false)
                 return
             }
         }
 
         window.center()
+    }
+
+    private func isFrameVisibleOnAnyScreen(_ frame: NSRect) -> Bool {
+        NSScreen.screens.contains { screen in
+            let visible = screen.visibleFrame
+            return visible.intersects(frame) || visible.contains(frame.origin)
+        }
     }
 
     private func saveMainWindowFrame(_ window: NSWindow) {

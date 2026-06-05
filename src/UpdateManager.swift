@@ -100,9 +100,15 @@ final class UpdateManager {
         return fileManager.fileExists(atPath: url.path) ? url : nil
     }
 
-    func checkForUpdatesNow() {
-        guard isAutoUpdateEnabled() || pendingUpdateVersion() != nil else { return }
-        guard !isCheckingForUpdates else { return }
+    func checkForUpdatesNow(force: Bool = false, completion: ((Bool) -> Void)? = nil) {
+        guard force || isAutoUpdateEnabled() || pendingUpdateVersion() != nil else {
+            completion?(false)
+            return
+        }
+        guard !isCheckingForUpdates else {
+            completion?(false)
+            return
+        }
 
         isCheckingForUpdates = true
         userDefaults.set(Date(), forKey: UpdateDefaultsKey.lastUpdateCheckDate)
@@ -114,50 +120,56 @@ final class UpdateManager {
 
             if let error = error {
                 print("⚠️ Update check failed: \(error.localizedDescription)")
+                DispatchQueue.main.async { completion?(false) }
                 return
             }
 
             guard let httpResponse = response as? HTTPURLResponse, 200..<300 ~= httpResponse.statusCode else {
                 print("⚠️ Update check failed: unexpected response")
+                DispatchQueue.main.async { completion?(false) }
                 return
             }
 
             guard let data = data else {
                 print("⚠️ Update check failed: empty response body")
+                DispatchQueue.main.async { completion?(false) }
                 return
             }
 
             do {
                 let release = try JSONDecoder().decode(GitHubRelease.self, from: data)
-                self.handleLatestRelease(release)
+                self.handleLatestRelease(release, completion: completion)
             } catch {
                 print("⚠️ Update check decode failed: \(error.localizedDescription)")
+                DispatchQueue.main.async { completion?(false) }
             }
         }
         task.resume()
     }
 
-    private func handleLatestRelease(_ release: GitHubRelease) {
+    private func handleLatestRelease(_ release: GitHubRelease, completion: ((Bool) -> Void)?) {
         let latestVersion = normalizedVersion(from: release.tagName)
         let currentVersion = currentAppVersion
 
         guard isVersion(latestVersion, newerThan: currentVersion) else {
             clearPendingUpdateIfAlreadyInstalled()
+            DispatchQueue.main.async { completion?(false) }
             return
         }
 
         let existingDownloadURL = pendingUpdateDownloadURL()
         if pendingUpdateVersion() == latestVersion, let existingDownloadURL = existingDownloadURL {
-            notifyPendingUpdate(version: latestVersion, downloadURL: existingDownloadURL)
+            notifyPendingUpdate(version: latestVersion, downloadURL: existingDownloadURL, completion: completion)
             return
         }
 
         guard let asset = preferredDMGAsset(from: release.assets) else {
             print("⚠️ Update check failed: no DMG asset found for \(latestVersion)")
+            DispatchQueue.main.async { completion?(false) }
             return
         }
 
-        downloadReleaseAsset(asset.browserDownloadURL, version: latestVersion)
+        downloadReleaseAsset(asset.browserDownloadURL, version: latestVersion, completion: completion)
     }
 
     private func preferredDMGAsset(from assets: [GitHubReleaseAsset]) -> GitHubReleaseAsset? {
@@ -166,13 +178,13 @@ final class UpdateManager {
         }
     }
 
-    private func downloadReleaseAsset(_ remoteURL: URL, version: String) {
+    private func downloadReleaseAsset(_ remoteURL: URL, version: String, completion: ((Bool) -> Void)?) {
         ensureUpdatesDirectoryExists()
 
         let destinationURL = updatesDirectory.appendingPathComponent("DeskGPT-\(version).dmg")
         if fileManager.fileExists(atPath: destinationURL.path) {
             persistPendingUpdate(version: version, downloadPath: destinationURL)
-            notifyPendingUpdate(version: version, downloadURL: destinationURL)
+            notifyPendingUpdate(version: version, downloadURL: destinationURL, completion: completion)
             return
         }
 
@@ -197,18 +209,20 @@ final class UpdateManager {
                 }
                 try self.fileManager.moveItem(at: tempURL, to: destinationURL)
                 self.persistPendingUpdate(version: version, downloadPath: destinationURL)
-                self.notifyPendingUpdate(version: version, downloadURL: destinationURL)
+                self.notifyPendingUpdate(version: version, downloadURL: destinationURL, completion: completion)
             } catch {
                 print("⚠️ Update download save failed: \(error.localizedDescription)")
+                DispatchQueue.main.async { completion?(false) }
             }
         }
         activeDownloadTask = task
         task.resume()
     }
 
-    private func notifyPendingUpdate(version: String, downloadURL: URL) {
+    private func notifyPendingUpdate(version: String, downloadURL: URL, completion: ((Bool) -> Void)?) {
         DispatchQueue.main.async {
             self.delegate?.updateManager(self, didPrepareUpdate: version, downloadURL: downloadURL)
+            completion?(true)
         }
     }
 
@@ -232,7 +246,7 @@ final class UpdateManager {
             return
         }
 
-        notifyPendingUpdate(version: version, downloadURL: downloadURL)
+        notifyPendingUpdate(version: version, downloadURL: downloadURL, completion: nil)
     }
 
     private func clearPendingUpdateIfAlreadyInstalled() {
