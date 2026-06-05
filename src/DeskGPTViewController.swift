@@ -98,6 +98,11 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
     private var initialLoadRetryWorkItem: DispatchWorkItem?
     private var initialLoadRetryCount = 0
     private let maximumInitialLoadRetries = 6
+    private var updateBannerView: NSVisualEffectView?
+    private var updateBannerTitleLabel: NSTextField?
+    private var updateBannerDetailLabel: NSTextField?
+    private var updateBannerVersion: String?
+    private var updateBannerDownloadURL: URL?
     private var pendingExternalPrompt: String?
     private var pendingExternalPromptAttempts: Int = 0
     private var externalPromptRetryTimer: DispatchWorkItem?
@@ -1036,6 +1041,125 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: dismiss)
             self.activeToastView = container
         }
+    }
+
+    func showUpdateAvailable(version: String, downloadPath: URL) {
+        DispatchQueue.main.async {
+            guard let hostView = self.webView else { return }
+
+            if self.updateBannerVersion == version, self.updateBannerDownloadURL == downloadPath, self.updateBannerView != nil {
+                self.updateBannerView?.isHidden = false
+                self.updateBannerView?.alphaValue = 1.0
+                return
+            }
+
+            self.dismissUpdateBanner()
+
+            let container = NSVisualEffectView()
+            container.translatesAutoresizingMaskIntoConstraints = false
+            container.wantsLayer = true
+            container.material = .hudWindow
+            container.blendingMode = .withinWindow
+            container.state = .active
+            container.layer?.cornerRadius = 16
+            container.layer?.masksToBounds = true
+            container.alphaValue = 0.0
+
+            let titleLabel = NSTextField(labelWithString: "새 버전 \(version)을 다운로드했습니다.")
+            titleLabel.translatesAutoresizingMaskIntoConstraints = false
+            titleLabel.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
+            titleLabel.textColor = .white
+            titleLabel.maximumNumberOfLines = 2
+            titleLabel.lineBreakMode = .byWordWrapping
+
+            let detailLabel = NSTextField(labelWithString: "Restart to Update를 누르면 바로 새 버전으로 재시작됩니다.")
+            detailLabel.translatesAutoresizingMaskIntoConstraints = false
+            detailLabel.font = NSFont.systemFont(ofSize: 12, weight: .regular)
+            detailLabel.textColor = .secondaryLabelColor
+            detailLabel.maximumNumberOfLines = 2
+            detailLabel.lineBreakMode = .byWordWrapping
+
+            let textStack = NSStackView(views: [titleLabel, detailLabel])
+            textStack.translatesAutoresizingMaskIntoConstraints = false
+            textStack.orientation = .vertical
+            textStack.alignment = .leading
+            textStack.spacing = 4
+
+            let restartButton = NSButton(title: "Restart to Update", target: self, action: #selector(self.restartToUpdateAction(_:)))
+            restartButton.bezelStyle = .rounded
+            restartButton.controlSize = .regular
+            restartButton.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+            restartButton.contentTintColor = .white
+            restartButton.isBordered = true
+            restartButton.translatesAutoresizingMaskIntoConstraints = false
+
+            let laterButton = NSButton(title: "다음 실행에 적용", target: self, action: #selector(self.deferUpdateAction(_:)))
+            laterButton.bezelStyle = .texturedRounded
+            laterButton.controlSize = .regular
+            laterButton.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+            laterButton.translatesAutoresizingMaskIntoConstraints = false
+
+            let actionStack = NSStackView(views: [restartButton, laterButton])
+            actionStack.translatesAutoresizingMaskIntoConstraints = false
+            actionStack.orientation = .horizontal
+            actionStack.alignment = .centerY
+            actionStack.spacing = 8
+
+            let contentStack = NSStackView(views: [textStack, actionStack])
+            contentStack.translatesAutoresizingMaskIntoConstraints = false
+            contentStack.orientation = .horizontal
+            contentStack.alignment = .centerY
+            contentStack.spacing = 18
+
+            container.addSubview(contentStack)
+            hostView.addSubview(container, positioned: .above, relativeTo: nil)
+
+            NSLayoutConstraint.activate([
+                container.topAnchor.constraint(equalTo: hostView.topAnchor, constant: 18),
+                container.centerXAnchor.constraint(equalTo: hostView.centerXAnchor),
+                container.widthAnchor.constraint(lessThanOrEqualToConstant: 760),
+                contentStack.topAnchor.constraint(equalTo: container.topAnchor, constant: 16),
+                contentStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -16),
+                contentStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 18),
+                contentStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -18),
+                restartButton.heightAnchor.constraint(equalToConstant: 30)
+            ])
+
+            container.layer?.backgroundColor = NSColor(calibratedWhite: 0.12, alpha: 0.78).cgColor
+
+            self.updateBannerView = container
+            self.updateBannerTitleLabel = titleLabel
+            self.updateBannerDetailLabel = detailLabel
+            self.updateBannerVersion = version
+            self.updateBannerDownloadURL = downloadPath
+
+            hostView.layoutSubtreeIfNeeded()
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.18
+                container.animator().alphaValue = 1.0
+            }
+        }
+    }
+
+    func dismissUpdateBanner() {
+        DispatchQueue.main.async {
+            self.updateBannerView?.removeFromSuperview()
+            self.updateBannerView = nil
+            self.updateBannerTitleLabel = nil
+            self.updateBannerDetailLabel = nil
+            self.updateBannerVersion = nil
+            self.updateBannerDownloadURL = nil
+        }
+    }
+
+    @objc private func restartToUpdateAction(_ sender: Any?) {
+        guard let downloadURL = updateBannerDownloadURL else { return }
+        UpdateInstaller.installAndRelaunch(from: downloadURL)
+        NSApp.terminate(nil)
+    }
+
+    @objc private func deferUpdateAction(_ sender: Any?) {
+        dismissUpdateBanner()
     }
     
     private func showErrorAlert(message: String, info: String) {

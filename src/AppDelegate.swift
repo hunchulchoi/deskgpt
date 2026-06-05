@@ -1,8 +1,10 @@
 import Cocoa
 
-class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UpdateManagerDelegate {
     var window: NSWindow?
     var viewController: DeskGPTViewController?
+    private let updateManager = UpdateManager.shared
+    private var preferencesWindowController: PreferencesWindowController?
     private var imageContextMenuMonitor: Any?
     private var refreshAccessoryViewController: NSTitlebarAccessoryViewController?
     private let mainWindowFrameKey = "DeskGPTMainWindowFrame"
@@ -37,6 +39,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         activateMainWindow()
         print("🚀 AppDelegate: Direct NSWindow created, ordered front, and app activated...")
         installTitlebarRefreshButton(on: win)
+        updateManager.delegate = self
+        updateManager.start()
+        updateManager.checkForUpdatesNow()
 
         setupMenu()
         print("🚀 AppDelegate: setupMenu finished...")
@@ -106,7 +111,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About DeskGPT", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Preferences...", action: nil, keyEquivalent: ",")
+        let preferencesItem = appMenu.addItem(withTitle: "Preferences...", action: #selector(showPreferencesAction), keyEquivalent: ",")
+        preferencesItem.target = self
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Hide DeskGPT", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h").keyEquivalentModifierMask = [.command, .option]
@@ -182,6 +188,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func zoomInAction() { viewController?.zoomIn() }
     @objc func zoomOutAction() { viewController?.zoomOut() }
     @objc func zoomResetAction() { viewController?.resetZoom() }
+    @objc func showPreferencesAction() {
+        if preferencesWindowController == nil {
+            preferencesWindowController = PreferencesWindowController()
+        }
+
+        preferencesWindowController?.showWindow(nil)
+    }
     
     @objc func toggleAlwaysOnTopAction() {
         guard let win = self.window else { return }
@@ -241,6 +254,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let window = window {
             saveMainWindowFrame(window)
         }
+        updateManager.stop()
+    }
+
+    func updateManager(_ manager: UpdateManager, didPrepareUpdate version: String, downloadURL: URL) {
+        viewController?.showUpdateAvailable(version: version, downloadPath: downloadURL)
     }
 
     private func activateMainWindow() {

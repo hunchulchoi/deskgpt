@@ -95,6 +95,9 @@ jobs:
             -module-cache-path "$SWIFT_MODULE_CACHE_DIR" \
             src/DeskGPTViewController.swift \
             src/DeskGPTPDFViewController.swift \
+            src/UpdateInstaller.swift \
+            src/UpdateManager.swift \
+            src/PreferencesWindowController.swift \
             src/AppDelegate.swift \
             src/main.swift \
             -o "$MACOS_DIR/DeskGPT" \

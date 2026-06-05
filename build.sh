@@ -44,6 +44,9 @@ plutil -replace CFBundleVersion -string "$(date +%Y%m%d%H%M%S)" build/DeskGPT.ap
 echo "🚀 Swift 파일 고속 컴파일 및 패키징..."
 swiftc src/DeskGPTViewController.swift \
        src/DeskGPTPDFViewController.swift \
+       src/UpdateInstaller.swift \
+       src/UpdateManager.swift \
+       src/PreferencesWindowController.swift \
        src/AppDelegate.swift \
        src/main.swift \
        -module-cache-path "$SWIFT_MODULE_CACHE_DIR" \
