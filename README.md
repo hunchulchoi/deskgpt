@@ -4,6 +4,12 @@
   <img src="https://raw.githubusercontent.com/hunchulchoi/deskgpt/main/.github/assets/icon.png" width="160" height="160" alt="DeskGPT Flat App Icon" onerror="this.src='https://github.com/hunchulchoi/deskgpt/raw/main/build/DeskGPT.app/Contents/Resources/AppIcon.icns'; this.onerror=null;" />
 </p>
 
+## Screenshot
+
+<p align="center">
+  <img src="assets/deskgpt_screen_shot.png" alt="DeskGPT screenshot" />
+</p>
+
 **DeskGPT** is an ultra-lightweight, premium standalone macOS application that wraps `https://chatgpt.com` in a native Cocoa frame.
 
 Unlike bulky Electron-based or Chromium-based wrappers that consume hundreds of megabytes of RAM, DeskGPT is built directly on the native **Cocoa (AppKit)** framework and **WebKit (WKWebView)** engine. The compiled binary is **less than 1MB in size**, consumes minimal system resources, and launches instantly.
