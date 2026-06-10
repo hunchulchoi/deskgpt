@@ -130,113 +130,6 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
         
         let jsSource = """
         (function() {
-            // 1. Inject styles for the floating download button
-            var style = document.createElement('style');
-            style.innerHTML = `
-                .deskgpt-download-container {
-                    position: relative !important;
-                }
-                .deskgpt-download-btn {
-                    position: absolute !important;
-                    top: 12px !important;
-                    right: 12px !important;
-                    z-index: 999999 !important;
-                    background: rgba(15, 23, 42, 0.75) !important;
-                    backdrop-filter: blur(8px) -webkit-backdrop-filter: blur(8px) !important;
-                    border: 1px solid rgba(255, 255, 255, 0.2) !important;
-                    border-radius: 6px !important;
-                    color: #ffffff !important;
-                    padding: 5px 10px !important;
-                    font-size: 12px !important;
-                    font-weight: 600 !important;
-                    cursor: pointer !important;
-                    opacity: 0 !important;
-                    transition: opacity 0.2s ease-in-out, background 0.15s ease !important;
-                    display: flex !important;
-                    align-items: center !important;
-                    gap: 4px !important;
-                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2) !important;
-                }
-                .deskgpt-download-btn:hover {
-                    background: rgba(15, 23, 42, 0.9) !important;
-                    border-color: rgba(255, 255, 255, 0.4) !important;
-                }
-                /* Reveal button on hover over the container */
-                .deskgpt-download-container:hover .deskgpt-download-btn {
-                    opacity: 1 !important;
-                }
-            `;
-            document.head.appendChild(style);
-
-            // 2. Attach download buttons only to newly discovered images.
-            var processedDownloadImages = new WeakSet();
-            var downloadableImageSelector = 'img[src*="oaiusercontent.com"], img[src*="blob:"]';
-
-            function isDownloadableImage(node) {
-                return node &&
-                    node.tagName === 'IMG' &&
-                    node.src &&
-                    (node.src.indexOf('oaiusercontent.com') !== -1 || node.src.indexOf('blob:') !== -1);
-            }
-
-            function attachDownloadButton(img) {
-                if (!isDownloadableImage(img) || processedDownloadImages.has(img)) return;
-
-                var container = img.closest('.relative') || img.parentElement;
-                if (!container) return;
-
-                processedDownloadImages.add(img);
-                container.classList.add('deskgpt-download-container');
-
-                if (container.querySelector('.deskgpt-download-btn')) return;
-
-                var btn = document.createElement('button');
-                btn.className = 'deskgpt-download-btn';
-                btn.innerHTML = '⬇️ 저장';
-                btn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-
-                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.directSaveImage) {
-                        window.webkit.messageHandlers.directSaveImage.postMessage(img.src);
-                    } else {
-                        alert("Direct save handler is not available. Please restart the app.");
-                    }
-                });
-
-                container.appendChild(btn);
-            }
-
-            function scanAndAttach(root) {
-                if (!root || root.nodeType !== Node.ELEMENT_NODE) return;
-
-                if (isDownloadableImage(root)) {
-                    attachDownloadButton(root);
-                }
-
-                if (!root.querySelectorAll) return;
-                root.querySelectorAll(downloadableImageSelector).forEach(attachDownloadButton);
-            }
-
-            scanAndAttach(document.body);
-
-            var observer = new MutationObserver(function(mutations) {
-                mutations.forEach(function(mutation) {
-                    if (mutation.type === 'attributes') {
-                        scanAndAttach(mutation.target);
-                        return;
-                    }
-
-                    mutation.addedNodes.forEach(scanAndAttach);
-                });
-            });
-            observer.observe(document.body, {
-                childList: true,
-                subtree: true,
-                attributes: true,
-                attributeFilter: ['src']
-            });
-
             function resolveImageAtPoint(event) {
                 var elements = document.elementsFromPoint(event.clientX, event.clientY);
                 var imgSrc = "";
@@ -279,6 +172,22 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
                 return imgSrc;
             }
 
+            function postDirectSaveImage(event) {
+                if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.directSaveImage) {
+                    return false;
+                }
+
+                var imgSrc = resolveImageAtPoint(event);
+                if (!imgSrc) {
+                    return false;
+                }
+
+                event.preventDefault();
+                event.stopPropagation();
+                window.webkit.messageHandlers.directSaveImage.postMessage(imgSrc);
+                return true;
+            }
+
             function postRightClickImage(event) {
                 if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.rightClickImageDetected) {
                     return false;
@@ -300,6 +209,11 @@ class DeskGPTViewController: NSViewController, WKNavigationDelegate, WKUIDelegat
             }
 
             window.addEventListener('mousedown', function(event) {
+                if (event.button === 0 && event.altKey) {
+                    postDirectSaveImage(event);
+                    return;
+                }
+
                 if (event.button !== 2 && !(event.button === 0 && event.ctrlKey)) {
                     return;
                 }
